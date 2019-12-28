@@ -20,20 +20,15 @@ struct Coordinate
         double r;        // km
         double theta;    // radians
         double phi;      // radians
-        //Convert to cartesian as follows:
-        // double x = r * sin(theta) * cos(phi);
-        // double y = r * sin(theta) * sin(phi);
-        // double z = r * cos(theta);
 };
 
 // Library of routines involving satellite geometry
 class SatGeometry
 {
 public:
-	SatGeometry (){}
-	double distance (Vector a, Vector b);              
-	// static void spherical_to_cartesian(double, double, double,
-	//     double &, double &, double &);
+	SatGeometry () {}
+        Vector SpheToCartCoord (Coordinate s);
+	double distance (Coordinate a, Coordinate b);              
 	// static double propdelay(coordinate, coordinate);
 	double get_latitude (Coordinate);
 	double get_longitude (Coordinate);
@@ -47,11 +42,21 @@ protected:
         int command(/*int argc, const char*const* argv */) { return 0; }
 };
 
-double SatGeometry::distance (Vector a, Vector b)
+Vector SatGeometry::SpheToCartCoord (Coordinate s)
 {
-    double dist_x = (a.x - b.x) * (a.x - b.x);
-    double dist_y = (a.x - b.x) * (a.x - b.x);
-    return sqrt(dist_x + dist_y);
+        double x = s.r * sin(s.theta) * cos(s.phi);
+        double y = s.r * sin(s.theta) * sin(s.phi);
+        double z = s.r * cos(s.theta);
+        return {x, y, z};
+}
+
+double SatGeometry::distance (Coordinate a, Coordinate b)
+{
+        Vector cart_a = SpheToCartCoord(a);
+        Vector cart_b = SpheToCartCoord(b);
+        double dist_x = (cart_a.x - cart_b.x) * (cart_a.x - cart_b.x);
+        double dist_y = (cart_a.x - cart_b.x) * (cart_a.x - cart_b.x);
+        return sqrt(dist_x + dist_y);
 }
 
 double SatGeometry::get_altitude (Coordinate a)
@@ -103,29 +108,40 @@ struct OrbitalSat
 class Constellation
 {
         public:
-                Constellation(double c_alt, double c_inc, uint32_t c_nPlane, uint32_t c_nSat):
-                              alt (c_alt), inc (c_inc), nPlane (c_nPlane), nSat (c_nSat) { SetSatellite(); }
+                Constellation (double c_alt, double c_inc, uint32_t c_nPlane, uint32_t c_nSat):
+                               alt (c_alt), inc (c_inc), nPlane (c_nPlane), nSat (c_nSat) { SetSatellite(); }
                 ~Constellation()
                 {
                         delete[] satellite;
                 }
-                void SetSatellite();
-                void SetInit (uint32_t satNode);
-                Vector SphericalToCartesianCoordinates (double, double, double);
+                void SetInit ();
                 Vector SatPos (uint32_t satNode);
                 Coordinate Coord ();
-                Vector* GetPos() {return satellite;}
+                Vector* get_pos () {return satellite;}
+                Coordinate* get_sphe () {return spheCoord; }
+                void CreateLink ();
+                std::vector<Vector> get_link () { return link; }
+
+                std::vector<uint32_t> get_satdex () { return satDex; }
                 
         protected:
                 double alt;
                 double inc;
                 uint32_t nPlane;
                 uint32_t nSat;
+                uint32_t curSat;
                 double period;
-                Coordinate init;
+                std::vector<Vector> link; 
+                Coordinate* spheCoord = new Coordinate [nPlane * nSat];
                 Vector* satellite = new Vector [nPlane * nSat];
                 std::vector<OrbitalSat> polarSat;
                 SatGeometry geometry;
+
+                std::vector<uint32_t> satDex;
+
+        private:
+                void SetSatellite ();
+                Coordinate init;
 };
 
 void Constellation::SetSatellite ()
@@ -139,12 +155,12 @@ void Constellation::SetSatellite ()
                         polarSat.push_back ({alt, inc, planeAngle*a, i*satAngle + a*phaseOffset*satAngle, a});
 }
 
-void Constellation::SetInit (uint32_t satNode)
+void Constellation::SetInit ()
 {
-        double satAlt = polarSat[satNode].altitude; 
-        double satLon = polarSat[satNode].longitude;
-        double satAlpha = polarSat[satNode].alpha;
-        double satIncl = polarSat[satNode].inclination;
+        double satAlt = polarSat[curSat].altitude; 
+        double satLon = polarSat[curSat].longitude;
+        double satAlpha = polarSat[curSat].alpha;
+        double satIncl = polarSat[curSat].inclination;
 
         init.r = satAlt + EARTH_RADIUS; // Altitude in km above the earth
         if (satAlpha < 0)
@@ -171,18 +187,8 @@ void Constellation::SetInit (uint32_t satNode)
         period = 2 * PI * sqrt(num/MU); // seconds
 }
 
-Vector Constellation::SphericalToCartesianCoordinates (double r, double theta, double phi)
-{
-        double x = r * sin(theta) * cos(phi);
-        double y = r * sin(theta) * sin(phi);
-        double z = r * cos(theta);
-        Vector cartesian(x, y, z);
-        return cartesian;
-}
-
 Coordinate Constellation::Coord ()
 {
-	Coordinate current;
 	double partial;  // fraction of orbit period completed
 	partial = (fmod(Simulator::Now().GetSeconds(), period)/period) * 2*PI; //rad
 	double theta_cur, phi_cur, theta_new, phi_new;
@@ -199,7 +205,7 @@ Coordinate Constellation::Coord ()
 
 	//assert (inc < PI);
 
-	// asin returns value between -PI/2 and PI/2, so 
+	// asin returns value between -PI/2 and PI/2, so    //     
 	// theta_new guaranteed to be between 0 and PI
 	theta_new = PI/2 - asin(sin(inc) * sin(theta_cur));
 	// if theta_new is between PI/2 and 3*PI/2, must correct
@@ -210,17 +216,59 @@ Coordinate Constellation::Coord ()
 		phi_new = atan(cos(inc) * tan(theta_cur)) + phi_cur;
 	phi_new = fmod(phi_new + 2*PI, 2*PI);
 	
-	current.r = init.r;
-	current.theta = theta_new;
-	current.phi = phi_new;
-	return current;
+	spheCoord[curSat].r = init.r;
+	spheCoord[curSat].theta = theta_new;
+	spheCoord[curSat].phi = phi_new;
+	return spheCoord[curSat];
 }
 
 Vector Constellation::SatPos (uint32_t sat)
 {
-        SetInit(sat);
+        curSat = sat;
+        SetInit();
         satellite[sat].x = RAD_TO_DEG(geometry.get_longitude(Coord()));
         satellite[sat].y = RAD_TO_DEG(geometry.get_latitude(Coord()));
         satellite[sat].z = geometry.get_altitude(Coord());
         return satellite[sat];
+}
+
+void Constellation::CreateLink ()
+{
+        for (uint32_t t = 0; t < nPlane*nSat; t++)
+        {
+                bool flag = 0;
+                double minDist;
+                double tempDist;
+                uint32_t satIndex;
+                uint32_t curPlane = t/nSat;
+                for (uint32_t a = 0; a < nPlane; a++)
+                {
+                        if (a == curPlane)
+                                continue;
+                        for (uint32_t i = 0; i < nSat; i++)
+                        {       
+                                if (flag == 0)
+                                {
+                                        flag = 1;
+                                        satIndex = a*nSat + i;
+                                        minDist = geometry.distance(spheCoord[t], spheCoord[satIndex]);
+                                        continue;
+                                }
+                                tempDist = geometry.distance(spheCoord[t], spheCoord[a*nSat + i]);
+                                if (minDist > tempDist)
+                                {
+                                        satIndex = a*nSat + i;
+                                        minDist = tempDist;
+                                }
+                        }
+                }
+                link.push_back(satellite[satIndex]);
+                satDex.push_back(satIndex);
+        }
+        double a = geometry.distance(spheCoord[2], spheCoord[130]);
+        double b = geometry.distance(spheCoord[2], spheCoord[176]);
+        std::cout << "distance 130: " << a << ", distance 176: " << b << std::endl;
+        std::cout << "position 130: " << satellite[130] << ", position 176: " << satellite[176] << ", position 2: " << satellite[2] << std::endl;
+        // std::cout << "sphe 130: " << spheCoord[130].r << spheCoord[130].theta
+        //  << ", sphe 176: " << spheCoord[176] << ", sphe 2: " << spheCoord[2] << std::endl;
 }

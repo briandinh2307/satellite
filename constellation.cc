@@ -44,8 +44,23 @@ void SetSatPos (NodeContainer* satPos, Constellation* wDelta)
 // Check for position
 static void RetrievePos(Constellation* netWork)
 {
-    Vector* a = netWork->GetPos();
+    Vector* a = netWork->get_pos();
     std::cout << "x: " << a[1].x << " y: " << a[1].y << std::endl;
+    
+    std::vector<Vector> link = netWork->get_link();
+    std::vector<uint32_t> dex = netWork->get_satdex();
+    for (uint i = 0; i < link.size(); i++)
+    {
+        uint32_t plane = (dex[i]+1)/24 + 1;
+        uint32_t sat = 24 - (24*plane - (dex[i]+1));
+        std::cout << "sat: " << i << ", " << link[i].x << ", " << link[i].y << ", " << link[i].z << ", " << plane << "/" << sat << std::endl;
+    }
+       
+    
+    // Coordinate* s = netWork->get_sphe();
+    // for (uint i = 0; i < link.size(); i++)
+    //     std::cout << "sat: " << i << ", r= " << s[i].r << ", theta= " << s[i].theta << ", phi= " << s[i].phi << std::endl;
+    std::cout << "link position" << std::endl << std::endl;
 }
 
 int main (int argc, char *argv[])
@@ -78,12 +93,14 @@ int main (int argc, char *argv[])
     NodeContainer satellite;
     satellite.Create (nPlane * nSat);
 
+    // Mobility install is needed for SetPostion
     MobilityHelper mobility;
     mobility.Install (satellite);
 
     Constellation satNetWork(alt, inc, nPlane, nSat);
     SetSatPos(&satellite, &satNetWork);
 
+    satNetWork.CreateLink();
     // Check for position
     Simulator::Schedule (Seconds(watchTime), &RetrievePos, &satNetWork);
     // std::vector<SatCoord> link;
