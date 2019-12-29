@@ -7,6 +7,7 @@
 #define LIGHT 299793 // km/s
 #define EARTH_PERIOD 86164 // seconds
 #define EARTH_RADIUS 6378  // km
+#define f_Delta 5
 
 #define DEG_TO_RAD(x) ((x) * PI/180)
 #define RAD_TO_DEG(x) ((x) * 180/PI)
@@ -28,7 +29,7 @@ class SatGeometry
 public:
 	SatGeometry () {}
         Vector SpheToCartCoord (Coordinate s);
-	double distance (Coordinate a, Coordinate b);              
+        double distance_geo (Vector a, Vector b);            
 	// static double propdelay(coordinate, coordinate);
 	double get_latitude (Coordinate);
 	double get_longitude (Coordinate);
@@ -50,13 +51,12 @@ Vector SatGeometry::SpheToCartCoord (Coordinate s)
         return {x, y, z};
 }
 
-double SatGeometry::distance (Coordinate a, Coordinate b)
+double SatGeometry::distance_geo (Vector a, Vector b)
 {
-        Vector cart_a = SpheToCartCoord(a);
-        Vector cart_b = SpheToCartCoord(b);
-        double dist_x = (cart_a.x - cart_b.x) * (cart_a.x - cart_b.x);
-        double dist_y = (cart_a.x - cart_b.x) * (cart_a.x - cart_b.x);
-        return sqrt(dist_x + dist_y);
+        double dist_x = (a.x - b.x);
+        dist_x = dist_x > 180.0 ? (360.0 - dist_x) : dist_x;
+        double dist_y = (a.y - b.y);
+        return sqrt(dist_x*dist_x + dist_y*dist_y);
 }
 
 double SatGeometry::get_altitude (Coordinate a)
@@ -117,12 +117,11 @@ class Constellation
                 void SetInit ();
                 Vector SatPos (uint32_t satNode);
                 Coordinate Coord ();
-                Vector* get_pos () {return satellite;}
-                Coordinate* get_sphe () {return spheCoord; }
+                Vector* get_pos () { return satellite; }
+
                 void CreateLink ();
                 std::vector<Vector> get_link () { return link; }
-
-                std::vector<uint32_t> get_satdex () { return satDex; }
+                std::vector<uint32_t> get_linkdex () { return linkDex; }
                 
         protected:
                 double alt;
@@ -131,24 +130,24 @@ class Constellation
                 uint32_t nSat;
                 uint32_t curSat;
                 double period;
-                std::vector<Vector> link; 
-                Coordinate* spheCoord = new Coordinate [nPlane * nSat];
                 Vector* satellite = new Vector [nPlane * nSat];
                 std::vector<OrbitalSat> polarSat;
                 SatGeometry geometry;
-
-                std::vector<uint32_t> satDex;
+                std::vector<Vector> link;       // Contains link to fifth satellite position
+                std::vector<uint32_t> linkDex;   // Contain link to fifth satellite number
 
         private:
                 void SetSatellite ();
                 Coordinate init;
+                Coordinate spheCoord;
+                bool link_init = 0;
 };
 
 void Constellation::SetSatellite ()
 {
         double satAngle = 360.0/nSat;
         double planeAngle = 360.0/nPlane;
-        double offsetMulti = 5.0;
+        double offsetMulti = f_Delta;
         double phaseOffset = offsetMulti/nPlane;
         for (uint32_t a = 0; a < nPlane; a++)
                 for (uint32_t i = 0; i < nSat; i++)
@@ -216,15 +215,15 @@ Coordinate Constellation::Coord ()
 		phi_new = atan(cos(inc) * tan(theta_cur)) + phi_cur;
 	phi_new = fmod(phi_new + 2*PI, 2*PI);
 	
-	spheCoord[curSat].r = init.r;
-	spheCoord[curSat].theta = theta_new;
-	spheCoord[curSat].phi = phi_new;
-	return spheCoord[curSat];
+	spheCoord.r = init.r;
+	spheCoord.theta = theta_new;
+	spheCoord.phi = phi_new;
+	return spheCoord;
 }
 
 Vector Constellation::SatPos (uint32_t sat)
 {
-        curSat = sat;
+        curSat = sat;// Contains link to fifth satellite position
         SetInit();
         satellite[sat].x = RAD_TO_DEG(geometry.get_longitude(Coord()));
         satellite[sat].y = RAD_TO_DEG(geometry.get_latitude(Coord()));
@@ -234,12 +233,15 @@ Vector Constellation::SatPos (uint32_t sat)
 
 void Constellation::CreateLink ()
 {
+        // std::vector<uint32_t> secLinkIndex;
         for (uint32_t t = 0; t < nPlane*nSat; t++)
         {
                 bool flag = 0;
                 double minDist;
+                // double secMinDist;
                 double tempDist;
                 uint32_t satIndex;
+                // uint32_t secSatIndex;
                 uint32_t curPlane = t/nSat;
                 for (uint32_t a = 0; a < nPlane; a++)
                 {
@@ -247,28 +249,77 @@ void Constellation::CreateLink ()
                                 continue;
                         for (uint32_t i = 0; i < nSat; i++)
                         {       
+                                // The fifth link won't connect to satellite with same index in adjacent planes
+                                if (a*nSat + i == t + nSat || a*nSat + i == t - nSat)
+                                        continue;
+                                if (a == nPlane - 1)
+                                {
+                                        if (i >= nSat - f_Delta && t == i - nSat + f_Delta)
+                                                continue;
+                                        else if (t == i + 5)
+                                                continue;
+                                }     
+                                
                                 if (flag == 0)
                                 {
                                         flag = 1;
                                         satIndex = a*nSat + i;
-                                        minDist = geometry.distance(spheCoord[t], spheCoord[satIndex]);
+                                        minDist = geometry.distance_geo(satellite[t], satellite[satIndex]);
+                                        // secSatIndex = a*nSat + i;
+                                        // secMinDist = geometry.distance_geo(satellite[t], satellite[secSatIndex]);
                                         continue;
                                 }
-                                tempDist = geometry.distance(spheCoord[t], spheCoord[a*nSat + i]);
+                                tempDist = geometry.distance_geo(satellite[t], satellite[a*nSat + i]);
                                 if (minDist > tempDist)
                                 {
                                         satIndex = a*nSat + i;
                                         minDist = tempDist;
                                 }
+                                // else if (secMinDist > tempDist)
+                                // {
+                                //         secSatIndex = a*nSat + i;
+                                //         secMinDist = tempDist;
+                                // }
                         }
                 }
-                link.push_back(satellite[satIndex]);
-                satDex.push_back(satIndex);
+                if (link_init == 0)
+                {
+                        link.push_back(satellite[satIndex]);
+                        linkDex.push_back(satIndex);
+                        // secLinkIndex.push_back(secSatIndex);
+                }
+                else
+                {
+                        link[t] = satellite[satIndex];
+                        linkDex[t] = satIndex;
+                        // secLinkIndex[t] = secSatIndex;
+                }                
         }
-        double a = geometry.distance(spheCoord[2], spheCoord[130]);
-        double b = geometry.distance(spheCoord[2], spheCoord[176]);
-        std::cout << "distance 130: " << a << ", distance 176: " << b << std::endl;
-        std::cout << "position 130: " << satellite[130] << ", position 176: " << satellite[176] << ", position 2: " << satellite[2] << std::endl;
-        // std::cout << "sphe 130: " << spheCoord[130].r << spheCoord[130].theta
-        //  << ", sphe 176: " << spheCoord[176] << ", sphe 2: " << spheCoord[2] << std::endl;
+
+        for (uint32_t t = 0; t < nPlane * nSat; t++)
+        {
+                uint32_t tmp = linkDex[t];
+                if (t != linkDex[tmp])
+                {
+                        linkDex[t] = t;
+                        link[t] = satellite[t];
+                }
+        }
+
+        // for (uint32_t t = 0; t < nPlane * nSat; t++)
+        // {
+        //         uint32_t tmp;
+        //         if (t == linkDex[t])
+        //         {
+        //                 tmp = secLinkIndex[t];
+        //                 if (tmp == secLinkIndex[tmp])
+        //                 {
+        //                         link[t] = satellite[tmp];
+        //                         linkDex[t] = tmp;
+        //                         link[tmp] = satellite[t];
+        //                         linkDex[tmp] = t;
+        //                 }
+        //         }
+        // }
+        link_init = 1;
 }
