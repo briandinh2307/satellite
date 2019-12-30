@@ -122,6 +122,7 @@ class Constellation
                 void CreateLink ();
                 std::vector<Vector> get_link () { return link; }
                 std::vector<uint32_t> get_linkdex () { return linkDex; }
+                std::vector<uint32_t> get_seclinkdex () { return secLinkDex; }
                 
         protected:
                 double alt;
@@ -140,6 +141,7 @@ class Constellation
                 void SetSatellite ();
                 Coordinate init;
                 Coordinate spheCoord;
+                std::vector<uint32_t> secLinkDex;
                 bool link_init = 0;
 };
 
@@ -233,15 +235,14 @@ Vector Constellation::SatPos (uint32_t sat)
 
 void Constellation::CreateLink ()
 {
-        // std::vector<uint32_t> secLinkIndex;
         for (uint32_t t = 0; t < nPlane*nSat; t++)
         {
                 bool flag = 0;
                 double minDist;
-                // double secMinDist;
+                double secMinDist;
                 double tempDist;
                 uint32_t satIndex;
-                // uint32_t secSatIndex;
+                uint32_t secSatIndex;
                 uint32_t curPlane = t/nSat;
                 for (uint32_t a = 0; a < nPlane; a++)
                 {
@@ -265,34 +266,37 @@ void Constellation::CreateLink ()
                                         flag = 1;
                                         satIndex = a*nSat + i;
                                         minDist = geometry.distance_geo(satellite[t], satellite[satIndex]);
-                                        // secSatIndex = a*nSat + i;
-                                        // secMinDist = geometry.distance_geo(satellite[t], satellite[secSatIndex]);
+                                        secSatIndex = satIndex + 1;
+                                        secMinDist = geometry.distance_geo(satellite[t], satellite[secSatIndex]);
                                         continue;
                                 }
                                 tempDist = geometry.distance_geo(satellite[t], satellite[a*nSat + i]);
                                 if (minDist > tempDist)
                                 {
+                                        secSatIndex = satIndex;
+                                        secMinDist = minDist;
                                         satIndex = a*nSat + i;
                                         minDist = tempDist;
+
                                 }
-                                // else if (secMinDist > tempDist)
-                                // {
-                                //         secSatIndex = a*nSat + i;
-                                //         secMinDist = tempDist;
-                                // }
+                                else if (secMinDist > tempDist)
+                                {
+                                        secSatIndex = a*nSat + i;
+                                        secMinDist = tempDist;
+                                }
                         }
                 }
                 if (link_init == 0)
                 {
                         link.push_back(satellite[satIndex]);
                         linkDex.push_back(satIndex);
-                        // secLinkIndex.push_back(secSatIndex);
+                        secLinkDex.push_back(secSatIndex);
                 }
                 else
                 {
                         link[t] = satellite[satIndex];
                         linkDex[t] = satIndex;
-                        // secLinkIndex[t] = secSatIndex;
+                        secLinkDex[t] = secSatIndex;
                 }                
         }
 
@@ -306,20 +310,20 @@ void Constellation::CreateLink ()
                 }
         }
 
-        // for (uint32_t t = 0; t < nPlane * nSat; t++)
-        // {
-        //         uint32_t tmp;
-        //         if (t == linkDex[t])
-        //         {
-        //                 tmp = secLinkIndex[t];
-        //                 if (tmp == secLinkIndex[tmp])
-        //                 {
-        //                         link[t] = satellite[tmp];
-        //                         linkDex[t] = tmp;
-        //                         link[tmp] = satellite[t];
-        //                         linkDex[tmp] = t;
-        //                 }
-        //         }
-        // }
+        for (uint32_t t = 0; t < nPlane * nSat; t++)
+        {
+                uint32_t tmp;
+                if (t == linkDex[t])
+                {
+                        tmp = secLinkDex[t];
+                        if (tmp == linkDex[tmp])
+                        {
+                                link[t] = satellite[tmp];
+                                linkDex[t] = tmp;
+                                link[tmp] = satellite[t];
+                                linkDex[tmp] = t;
+                        }
+                }
+        }
         link_init = 1;
 }

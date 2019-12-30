@@ -48,6 +48,7 @@ static void RetrieveLink(Constellation* netWork, uint32_t tmp_sat)
     uint32_t count = 0;
     std::vector<Vector> link = netWork->get_link();
     std::vector<uint32_t> dex = netWork->get_linkdex();
+
     for (uint i = 0; i < link.size(); i++)
     {
         uint32_t curPlane = i/tmp_sat + 1;
@@ -60,13 +61,14 @@ static void RetrieveLink(Constellation* netWork, uint32_t tmp_sat)
         else
         {
             std::cout << "t = " << Simulator::Now().GetSeconds() << "s" << ", "  << curPlane << "/" << curSat << ", " 
-                      << link[i].x << ", " << link[i].y << ", " << link[i].z << ", " << plane << "/" << sat << " NO" << std::endl;
+                      << link[i].x << ", " << link[i].y << ", " << link[i].z << ", " << plane << "/" << sat << "\t NO" << std::endl;
             count++;
         }
     }
     std::cout << std::endl << "Number of no 5th link: " << count << std::endl;
     std::cout << std::endl << "link position" << std::endl << std::endl;
 }
+//
 
 int main (int argc, char *argv[])
 {
